@@ -58,7 +58,6 @@ class FlowBuilder:
             return
         f = open(self.pc_target, 'w')
         pc = self.min_asm_addr
-        # 第一次遍历处理所有非ret的汇编语句
         while pc < self.max_asm_addr:
             next_pc = pc + 1
             while next_pc < self.max_asm_addr and next_pc not in self.addr2asm.keys():
@@ -66,15 +65,11 @@ class FlowBuilder:
 
             asm_code = self.addr2asm[pc]
 
-            # 本轮迭代跳过ret的next_pc
             if 'ret' in asm_code:
                 self.next_pc[pc] = []
-            # 跳过动态链接调用或者插桩代码
             elif '@plt' in asm_code or '__afl_maybe_log' in asm_code:
                 self.next_pc[pc] = [next_pc]
-            # 无条件跳转
             elif 'call' in asm_code or 'jmp' in asm_code:
-                # todo: 处理call   *%eax
                 reg_exp = r'.*?(0x)?([0-9a-f]{3,})'
                 search_obj = re.search(reg_exp, asm_code)
                 if search_obj:
@@ -86,7 +81,6 @@ class FlowBuilder:
                 else:
                     print(f'[-]: warning! unable to recognize {asm_code}')
                     self.next_pc[pc] = [next_pc]
-            # 有条件跳转
             elif action(asm_code)[0] == 'j':
                 reg_exp = r'.*?(0x)?([0-9a-f]{3,})'
                 search_obj = re.search(reg_exp, asm_code)
@@ -99,7 +93,6 @@ class FlowBuilder:
                 else:
                     print(f'[-]: warning! unable to recognize {asm_code}')
                     self.next_pc[pc] = [next_pc]
-            # 普通语句
             else:
                 self.next_pc[pc] = [next_pc]
             pc = next_pc
@@ -118,7 +111,6 @@ class FlowBuilder:
             self.last_pc[addr] = set()
         for addr in self.next_pc.keys():
             for next_addr in self.next_pc[addr]:
-                # main函数的返回地址为0
                 if next_addr == 0:
                     continue
                 self.last_pc[next_addr].add(addr)
@@ -198,18 +190,14 @@ class FlowBuilder:
         while pc < self.max_asm_addr and pc not in visited_addr:
             visited_addr.add(pc)
             next_pc = self.next_pc[pc]
-            # 有条件跳转
             if len(next_pc) == 2:
                 self.ret_dfs(next_pc[0], func_ret_addr, visited_addr)
                 self.ret_dfs(next_pc[1], func_ret_addr, visited_addr)
                 return
-            # ret指令
             if len(next_pc) == 0:
                 self.next_pc[pc] = [func_ret_addr]
                 return
-            # 判断是简单汇编指令还是一次函数调用
             stmt = self.addr2asm[pc]
-            # 非动态链接函数调用
             if 'call' in stmt and '@plt' not in stmt and '__afl_maybe_log' not in stmt:
                 ret_addr = pc + 1
                 while ret_addr < self.max_asm_addr and ret_addr not in self.addr2asm.keys():
